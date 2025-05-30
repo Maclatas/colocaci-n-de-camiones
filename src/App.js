@@ -44,47 +44,50 @@ const initialZones = {
   },
 };
 
-// Estilos para los elementos arrastrables
-const getItemStyle = (itemId, currentDraggedItemId, isDraggingTouch, touchPosition) => {
+// Estilos para los elementos arrastrables (se mantiene la lógica de arrastre de ratón)
+const getItemStyle = (itemId, currentDraggedItemId, isCopied) => { // MODIFICADO: Simplificado para arrastre táctil eliminado, añadido isCopied
   const style = {
     userSelect: 'none',
     padding: '1rem',
     margin: '0 0 0.5rem 0',
     borderRadius: '0.5rem',
-    backgroundColor: itemId === currentDraggedItemId ? '#2563eb' : '#3b82f6', // Azul más oscuro al arrastrar
+    backgroundColor: '#3b82f6',
     color: 'white',
-    boxShadow: itemId === currentDraggedItemId ? '0 4px 8px rgba(0,0,0,0.2)' : '0 2px 4px rgba(0,0,0,0.1)',
-    opacity: itemId === currentDraggedItemId ? 0.4 : 1, // Hace el elemento arrastrado semi-transparente
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
     cursor: 'grab',
-    transition: 'background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+    transition: 'background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out, border 0.2s ease-in-out', // Añadida transición para el borde
+    opacity: 1,
   };
 
-  if (isDraggingTouch && itemId === currentDraggedItemId && touchPosition) {
-    // Estilos para el elemento que se está arrastrando con el dedo
+  // Estilo para el elemento que se está arrastrando con el ratón
+  if (itemId === currentDraggedItemId) {
     Object.assign(style, {
-      position: 'fixed',
-      left: touchPosition.x - 50, // Ajuste para centrar el dedo
-      top: touchPosition.y - 20,  // Ajuste para centrar el dedo
-      zIndex: 1000,
-      pointerEvents: 'none', // Para que los eventos de abajo sigan funcionando
-      width: '150px', // Ancho fijo para el elemento arrastrado
-      textAlign: 'center',
-      opacity: 0.9,
-      transform: 'scale(1.05)', // Ligeramente más grande
+      backgroundColor: '#2563eb', // Azul más oscuro al arrastrar
+      boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+      opacity: 0.7, // Semi-transparente
     });
   }
+
+  // NUEVO: Estilo para la matrícula copiada
+  if (isCopied) {
+    Object.assign(style, {
+      border: '2px solid #22c55e', // Borde verde para la matrícula copiada
+      boxShadow: '0 0 0 3px rgba(34, 197, 94, 0.5)', // Resplandor verde
+    });
+  }
+
   return style;
 };
 
-
 // Estilos para las zonas de destino (listas)
-const getListStyle = (isHovered) => ({
+const getListStyle = (isHovered, isPasteTarget) => ({ // MODIFICADO: Añadido isPasteTarget
   background: isHovered ? '#bfdbfe' : '#eff6ff', // Azul claro al arrastrar sobre ella
   padding: '0.5rem',
   borderRadius: '0.75rem',
   minHeight: '100px',
   flexGrow: 1, // Permite que las zonas se expandan
-  transition: 'background 0.2s ease-in-out', // Transición suave para el color de fondo
+  transition: 'background 0.2s ease-in-out, border 0.2s ease-in-out', // Añadida transición para el borde
+  border: isPasteTarget ? '2px dashed #2563eb' : '2px solid transparent', // NUEVO: Borde punteado si es objetivo de pegado
 });
 
 function App() {
@@ -99,23 +102,15 @@ function App() {
   // Estado para el ítem que se está arrastrando y la zona de origen (para arrastre con ratón)
   const [draggedItemId, setDraggedItemId] = useState(null);
   const [draggedFromZoneId, setDraggedFromZoneId] = useState(null);
-  // Estado para la zona sobre la que se está arrastrando (para efectos visuales)
+  // Estado para la zona sobre la que se está arrastrando (para efectos visuales del ratón)
   const [hoveredZoneId, setHoveredZoneId] = useState(null);
   // Estado para el valor del input de nueva matrícula
   const [newPlateInput, setNewPlateInput] = useState('');
 
-  // Estados para el arrastre táctil
-  const [isDraggingTouch, setIsDraggingTouch] = useState(false);
-  const [touchPosition, setTouchPosition] = useState(null);
-  const draggedItemRef = useRef(null); // Referencia al elemento que se está arrastrando con el dedo
-  const zoneRefs = { // Referencias a los contenedores de las zonas para detectar colisiones
-    'master-list': useRef(null),
-    'nave-oficinas': useRef(null),
-    'nave-mecanico': useRef(null),
-    'nave-nueva': useRef(null),
-    'exterior': useRef(null),
-  };
-
+  // NUEVO: Estados para la lógica de "Copiar-Pegar"
+  const [copiedPlateId, setCopiedPlateId] = useState(null);
+  const [copiedPlateContent, setCopiedPlateContent] = useState(null);
+  const longPressTimeoutRef = useRef(null); // Ref para el temporizador de pulsación larga
 
   // Guardar el estado en localStorage cada vez que 'zones' cambie
   useEffect(() => {
@@ -124,6 +119,10 @@ function App() {
 
   // --- Lógica de Arrastrar y Soltar (Ratón) ---
   const handleDragStart = (e, itemId, sourceZoneId) => {
+    // Limpia cualquier matrícula copiada al iniciar un arrastre
+    setCopiedPlateId(null);
+    setCopiedPlateContent(null);
+
     e.dataTransfer.setData("text/plain", itemId);
     e.dataTransfer.setData("text/sourceZone", sourceZoneId);
     setDraggedItemId(itemId);
@@ -158,68 +157,75 @@ function App() {
     moveItemBetweenZones(itemId, sourceZoneId, destinationZoneId);
   };
 
-  // --- Lógica de Arrastrar y Soltar (Táctil) ---
-  const handleTouchStart = (e, itemId, sourceZoneId) => {
-    // Evita el scroll o el zoom en el inicio del arrastre táctil
-    e.preventDefault(); 
-    setIsDraggingTouch(true);
-    setDraggedItemId(itemId);
-    setDraggedFromZoneId(sourceZoneId);
-    // Captura la posición inicial del toque
-    const touch = e.touches[0];
-    setTouchPosition({ x: touch.clientX, y: touch.clientY });
-  };
+  // --- NUEVO: Lógica de Copiar/Pegar (Pulsación Larga) ---
 
-  const handleTouchMove = (e) => {
-    if (!isDraggingTouch) return;
+  // Inicia el temporizador de pulsación larga
+  const handlePressStart = useCallback((e, itemId, sourceZoneId = null) => {
+    // Solo inicia el temporizador si no estamos arrastrando con el ratón
+    if (!draggedItemId) {
+      // Previene el scroll o el zoom en el inicio del toque/pulsación
+      e.preventDefault();
+      
+      longPressTimeoutRef.current = setTimeout(() => {
+        // Si el itemId es null, significa que se pulsó en una zona de destino para "pegar"
+        if (itemId === null) {
+          // No hace nada aquí, la acción de pegar se maneja en handlePressEnd de la zona
+        } else {
+          // Si hay itemId, significa que se pulsó una matrícula para "copiar"
+          const plateToCopy = zones[sourceZoneId || 'master-list'].items.find(item => item.id === itemId);
+          if (plateToCopy) {
+            setCopiedPlateId(plateToCopy.id);
+            setCopiedPlateContent(plateToCopy.content);
+            // Puedes usar una alerta o un mensaje temporal en pantalla
+            alert(`Matrícula "${plateToCopy.content}" copiada. Ahora pulsa largo en una zona para "pegar".`);
+          }
+        }
+      }, 700); // 700ms para considerar una pulsación larga
+    }
+  }, [zones, draggedItemId]); // Dependencias del useCallback
 
-    // Evita el scroll o el zoom mientras se arrastra
-    e.preventDefault(); 
-    const touch = e.touches[0];
-    setTouchPosition({ x: touch.clientX, y: touch.clientY });
+  // Limpia el temporizador y ejecuta la acción si fue una pulsación larga para pegar
+  const handlePressEnd = useCallback((destinationZoneId = null) => {
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null; // Reinicia la referencia
 
-    // Detectar si el elemento arrastrado está sobre una zona de destino
-    let currentHoveredZone = null;
-    for (const zoneId in zoneRefs) {
-      const zoneRect = zoneRefs[zoneId].current?.getBoundingClientRect();
-      if (zoneRect &&
-          touch.clientX >= zoneRect.left &&
-          touch.clientX <= zoneRect.right &&
-          touch.clientY >= zoneRect.top &&
-          touch.clientY <= zoneRect.bottom) {
-        currentHoveredZone = zoneId;
-        break;
+      // Si se soltó en una zona de destino Y hay una matrícula copiada, entonces "pegar"
+      if (destinationZoneId && copiedPlateId) {
+        handlePastePlate(copiedPlateId, destinationZoneId);
       }
     }
-    setHoveredZoneId(currentHoveredZone);
+  }, [copiedPlateId]); // Dependencias del useCallback
+
+  // Función para pegar la matrícula copiada en una zona de destino
+  const handlePastePlate = (itemId, destinationZoneId) => {
+    if (copiedPlateId && copiedPlateContent) {
+      // Necesitamos encontrar la zona de origen de la matrícula copiada.
+      // Recorre todas las zonas para encontrar dónde está actualmente la matrícula copiada.
+      let sourceZoneId = null;
+      for (const zoneKey in zones) {
+        if (zones[zoneKey].items.some(item => item.id === copiedPlateId)) {
+          sourceZoneId = zoneKey;
+          break;
+        }
+      }
+
+      if (sourceZoneId) {
+        moveItemBetweenZones(itemId, sourceZoneId, destinationZoneId);
+        // Limpia el estado de la matrícula copiada después de pegarla
+        setCopiedPlateId(null);
+        setCopiedPlateContent(null);
+        alert(`Matrícula "${copiedPlateContent}" pegada en "${zones[destinationZoneId].name}".`);
+      } else {
+        alert("Error: La matrícula copiada no se encontró en ninguna zona.");
+        setCopiedPlateId(null); // Limpiar por si acaso
+        setCopiedPlateContent(null);
+      }
+    } else {
+      alert("Primero copia una matrícula (mantén pulsada una matrícula por un momento).");
+    }
   };
 
-  const handleTouchEnd = () => {
-    if (!isDraggingTouch) return;
-
-    setIsDraggingTouch(false);
-    setTouchPosition(null);
-
-    // Determinar la zona de destino final
-    let finalDestinationZoneId = null;
-    if (hoveredZoneId && draggedItemId && draggedFromZoneId !== hoveredZoneId) {
-      finalDestinationZoneId = hoveredZoneId;
-    } else if (hoveredZoneId === draggedFromZoneId) {
-      // Si se soltó en la misma zona de origen, no mover
-      finalDestinationZoneId = null;
-    } else if (!hoveredZoneId) {
-      // Si se soltó fuera de cualquier zona, devolver a la lista maestra
-      finalDestinationZoneId = 'master-list';
-    }
-
-    if (finalDestinationZoneId && draggedItemId && draggedFromZoneId) {
-      moveItemBetweenZones(draggedItemId, draggedFromZoneId, finalDestinationZoneId);
-    }
-
-    setDraggedItemId(null);
-    setDraggedFromZoneId(null);
-    setHoveredZoneId(null);
-  };
 
   // --- Lógica Común de Movimiento de Ítems ---
   const moveItemBetweenZones = (itemId, sourceZoneId, destinationZoneId) => {
@@ -238,33 +244,35 @@ function App() {
         newZones[sourceZoneId].items = newZones[sourceZoneId].items.filter(item => item.id !== itemId);
       }
 
-      // Añade el ítem a la lista de destino
+      // Asegúrate de que no se duplique el ítem si ya existe en la zona de destino
       if (newZones[destinationZoneId]) {
-        newZones[destinationZoneId].items = [...newZones[destinationZoneId].items, itemToMove];
+        const itemExistsInDestination = newZones[destinationZoneId].items.some(item => item.id === itemId);
+        if (!itemExistsInDestination) {
+          newZones[destinationZoneId].items = [...newZones[destinationZoneId].items, itemToMove];
+        } else {
+          // Si ya existe, puedes decidir si no hacer nada o actualizarlo, etc.
+          // Por ahora, simplemente no lo añadimos de nuevo.
+        }
       }
 
       return newZones;
     });
   };
 
+
   // --- Funciones de Gestión de Matrículas y Zonas ---
   const handleReset = () => {
     const newZonesState = { ...initialZones };
-    newZonesState['master-list'].items = [...zones['master-list'].items];
-
+    // Recopilar todas las matrículas actuales de todas las zonas
+    let allCurrentPlates = [];
     Object.keys(zones).forEach(zoneId => {
-      if (zoneId !== 'master-list') {
-        newZonesState['master-list'].items = [
-          ...newZonesState['master-list'].items,
-          ...zones[zoneId].items
-        ];
-        newZonesState[zoneId].items = [];
-      }
+      allCurrentPlates = [...allCurrentPlates, ...zones[zoneId].items];
     });
 
+    // Asegurarse de que no haya duplicados y volver a la lista maestra
     const uniqueMasterListItems = [];
     const seenIds = new Set();
-    newZonesState['master-list'].items.forEach(item => {
+    allCurrentPlates.forEach(item => {
       if (!seenIds.has(item.id)) {
         uniqueMasterListItems.push(item);
         seenIds.add(item.id);
@@ -272,7 +280,16 @@ function App() {
     });
     newZonesState['master-list'].items = uniqueMasterListItems;
 
+    // Vaciar todas las demás zonas
+    Object.keys(zones).forEach(zoneId => {
+      if (zoneId !== 'master-list') {
+        newZonesState[zoneId].items = [];
+      }
+    });
+
     setZones(newZonesState);
+    setCopiedPlateId(null); // Limpiar matrícula copiada al reiniciar
+    setCopiedPlateContent(null);
   };
 
   const handleAddPlate = () => {
@@ -293,38 +310,28 @@ function App() {
   };
 
   const handleDeletePlate = (plateIdToDelete) => {
-    setZones(prevZones => ({
-      ...prevZones,
-      'master-list': {
-        ...prevZones['master-list'],
-        items: prevZones['master-list'].items.filter(item => item.id !== plateIdToDelete),
-      },
-      'nave-oficinas': {
-        ...prevZones['nave-oficinas'],
-        items: prevZones['nave-oficinas'].items.filter(item => item.id !== plateIdToDelete),
-      },
-      'nave-mecanico': {
-        ...prevZones['nave-mecanico'],
-        items: prevZones['nave-mecanico'].items.filter(item => item.id !== plateIdToDelete),
-      },
-      'nave-nueva': {
-        ...prevZones['nave-nueva'],
-        items: prevZones['nave-nueva'].items.filter(item => item.id !== plateIdToDelete),
-      },
-      'exterior': {
-        ...prevZones['exterior'],
-        items: prevZones['exterior'].items.filter(item => item.id !== plateIdToDelete),
-      },
-    }));
+    setZones(prevZones => {
+      const updatedZones = { ...prevZones };
+      let plateFound = false;
+      for (const zoneId in updatedZones) {
+        const initialLength = updatedZones[zoneId].items.length;
+        updatedZones[zoneId].items = updatedZones[zoneId].items.filter(item => item.id !== plateIdToDelete);
+        if (updatedZones[zoneId].items.length < initialLength) {
+          plateFound = true;
+        }
+      }
+      if (copiedPlateId === plateIdToDelete) {
+        setCopiedPlateId(null);
+        setCopiedPlateContent(null);
+      }
+      return plateFound ? updatedZones : prevZones;
+    });
   };
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-100 to-indigo-200 p-4 font-sans text-gray-800"
-         onMouseMove={isDraggingTouch ? handleTouchMove : undefined}
-         onMouseUp={isDraggingTouch ? handleTouchEnd : undefined}
-         onTouchMove={isDraggingTouch ? handleTouchMove : undefined}
-         onTouchEnd={isDraggingTouch ? handleTouchEnd : undefined}>
+    // MODIFICADO: Eliminados los eventos globales de ratón/táctil que impedían el scroll
+    <div className="min-h-screen bg-gradient-to-br from-blue-100 to-indigo-200 p-4 font-sans text-gray-800">
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
 
@@ -363,13 +370,13 @@ function App() {
             {zones['master-list'].name}
           </h2>
           <div
-            ref={zoneRefs['master-list']} // Asigna la referencia
+            // ref={zoneRefs['master-list']} // MODIFICADO: No necesitamos ref aquí si no hay arrastre táctil global
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, 'master-list')}
             onDragEnter={() => handleDragEnter('master-list')}
             onDragLeave={handleDragLeave}
-            style={getListStyle(hoveredZoneId === 'master-list')}
-            className="rounded-lg transition-colors duration-200 overflow-y-auto max-h-96" /* Añadido overflow-y-auto y max-h-96 */
+            style={getListStyle(hoveredZoneId === 'master-list', copiedPlateId !== null && hoveredZoneId === 'master-list')} // MODIFICADO: Añadido isPasteTarget
+            className="rounded-lg transition-colors duration-200 overflow-y-auto max-h-96"
           >
             {zones['master-list'].items.length === 0 && (
               <p className="text-gray-500 text-center py-4">No hay matrículas disponibles.</p>
@@ -379,9 +386,14 @@ function App() {
                 key={item.id}
                 draggable="true" // Habilita el arrastre para este elemento (ratón)
                 onDragStart={(e) => handleDragStart(e, item.id, 'master-list')}
-                onTouchStart={(e) => handleTouchStart(e, item.id, 'master-list')} // Evento táctil
-                style={getItemStyle(item.id, draggedItemId, isDraggingTouch, touchPosition)}
-                className="text-center text-lg font-medium flex justify-between items-center" // Añadido flex para alinear matrícula y botón
+                // NUEVO: Eventos para la pulsación larga de "copiar"
+                onTouchStart={(e) => handlePressStart(e, item.id, 'master-list')}
+                onTouchEnd={() => handlePressEnd(null)} // Pasa null porque no es zona de destino
+                onMouseDown={(e) => handlePressStart(e, item.id, 'master-list')}
+                onMouseUp={() => handlePressEnd(null)}
+                onMouseLeave={() => handlePressEnd(null)}
+                style={getItemStyle(item.id, draggedItemId, copiedPlateId === item.id)} // MODIFICADO: Añadido isCopied
+                className="text-center text-lg font-medium flex justify-between items-center"
               >
                 <span>{item.content}</span>
                 <button
@@ -402,7 +414,7 @@ function App() {
         {/* Contenedores de Zonas */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full lg:w-3/4">
           {Object.keys(zones).map((zoneId) => {
-            if (zoneId === 'master-list') return null;
+            if (zoneId === 'master-list') return null; // No renderiza la lista maestra aquí
 
             const zone = zones[zoneId];
             return (
@@ -414,24 +426,37 @@ function App() {
                   {zone.name}
                 </h2>
                 <div
-                  ref={zoneRefs[zoneId]} // Asigna la referencia
+                  // ref={zoneRefs[zoneId]} // MODIFICADO: No necesitamos ref aquí si no hay arrastre táctil global
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, zoneId)}
                   onDragEnter={() => handleDragEnter(zoneId)}
                   onDragLeave={handleDragLeave}
-                  style={getListStyle(hoveredZoneId === zoneId)}
-                  className="rounded-lg transition-colors duration-200 flex flex-col items-center overflow-y-auto max-h-96" /* Añadido overflow-y-auto y max-h-96 */
+                  // NUEVO: Eventos para la pulsación larga de "pegar" en la zona
+                  onTouchStart={(e) => handlePressStart(e, null, zoneId)} // Pasa null como itemId, zoneId como sourceZoneId
+                  onTouchEnd={() => handlePressEnd(zoneId)} // Pasa zoneId para "pegar"
+                  onMouseDown={(e) => handlePressStart(e, null, zoneId)}
+                  onMouseUp={() => handlePressEnd(zoneId)}
+                  onMouseLeave={() => handlePressEnd(null)} // Si el ratón se sale, cancela posible pegado
+                  style={getListStyle(hoveredZoneId === zoneId, copiedPlateId !== null && hoveredZoneId === zoneId)} // MODIFICADO: Añadido isPasteTarget
+                  className="rounded-lg transition-colors duration-200 flex flex-col items-center overflow-y-auto max-h-96"
                 >
                   {zone.items.length === 0 && (
-                    <p className="text-gray-500 text-center py-4">Arrastra matrículas aquí.</p>
+                    <p className="text-gray-500 text-center py-4">
+                      {copiedPlateId ? "Pulsa largo aquí para pegar." : "Arrastra matrículas aquí."} {/* NUEVO: Mensaje dinámico */}
+                    </p>
                   )}
                   {zone.items.map((item) => (
                     <div
                       key={item.id}
                       draggable="true" // Habilita el arrastre para este elemento (ratón)
                       onDragStart={(e) => handleDragStart(e, item.id, zoneId)}
-                      onTouchStart={(e) => handleTouchStart(e, item.id, zoneId)} // Evento táctil
-                      style={getItemStyle(item.id, draggedItemId, isDraggingTouch, touchPosition)}
+                      // NUEVO: Eventos para la pulsación larga de "copiar"
+                      onTouchStart={(e) => handlePressStart(e, item.id, zoneId)}
+                      onTouchEnd={() => handlePressEnd(null)}
+                      onMouseDown={(e) => handlePressStart(e, item.id, zoneId)}
+                      onMouseUp={() => handlePressEnd(null)}
+                      onMouseLeave={() => handlePressEnd(null)}
+                      style={getItemStyle(item.id, draggedItemId, copiedPlateId === item.id)} // MODIFICADO: Añadido isCopied
                       className="text-center text-lg font-medium w-full max-w-xs"
                     >
                       {item.content}
@@ -443,16 +468,7 @@ function App() {
           })}
         </div>
       </div>
-      {/* Renderiza el elemento arrastrado con el dedo fuera del flujo normal */}
-      {isDraggingTouch && draggedItemId && (
-        <div
-          ref={draggedItemRef}
-          style={getItemStyle(draggedItemId, draggedItemId, isDraggingTouch, touchPosition)}
-          className="text-center text-lg font-medium absolute"
-        >
-          {zones[draggedFromZoneId]?.items.find(item => item.id === draggedItemId)?.content}
-        </div>
-      )}
+      {/* MODIFICADO: Eliminado el renderizado del elemento arrastrado con el dedo (ya no es necesario) */}
     </div>
   );
 }
