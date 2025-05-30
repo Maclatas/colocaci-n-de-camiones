@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import './App.css'; // Asegúrate de que esta línea esté presente para importar el CSS
 
 // Datos iniciales de las matrículas
 const initialLicensePlates = [
@@ -159,20 +160,21 @@ function App() {
 
   // --- Lógica de Arrastrar y Soltar (Táctil) ---
   const handleTouchStart = (e, itemId, sourceZoneId) => {
+    // Evita el scroll o el zoom en el inicio del arrastre táctil
+    e.preventDefault(); 
     setIsDraggingTouch(true);
     setDraggedItemId(itemId);
     setDraggedFromZoneId(sourceZoneId);
     // Captura la posición inicial del toque
     const touch = e.touches[0];
     setTouchPosition({ x: touch.clientX, y: touch.clientY });
-
-    // Previene el scroll o el zoom mientras se arrastra
-    e.preventDefault();
   };
 
   const handleTouchMove = (e) => {
     if (!isDraggingTouch) return;
 
+    // Evita el scroll o el zoom mientras se arrastra
+    e.preventDefault(); 
     const touch = e.touches[0];
     setTouchPosition({ x: touch.clientX, y: touch.clientY });
 
@@ -190,7 +192,6 @@ function App() {
       }
     }
     setHoveredZoneId(currentHoveredZone);
-    e.preventDefault(); // Previene el scroll de la página
   };
 
   const handleTouchEnd = () => {
@@ -368,7 +369,7 @@ function App() {
             onDragEnter={() => handleDragEnter('master-list')}
             onDragLeave={handleDragLeave}
             style={getListStyle(hoveredZoneId === 'master-list')}
-            className="rounded-lg transition-colors duration-200"
+            className="rounded-lg transition-colors duration-200 overflow-y-auto max-h-96" /* Añadido overflow-y-auto y max-h-96 */
           >
             {zones['master-list'].items.length === 0 && (
               <p className="text-gray-500 text-center py-4">No hay matrículas disponibles.</p>
@@ -380,7 +381,7 @@ function App() {
                 onDragStart={(e) => handleDragStart(e, item.id, 'master-list')}
                 onTouchStart={(e) => handleTouchStart(e, item.id, 'master-list')} // Evento táctil
                 style={getItemStyle(item.id, draggedItemId, isDraggingTouch, touchPosition)}
-                className="text-center text-lg font-medium flex justify-between items-center"
+                className="text-center text-lg font-medium flex justify-between items-center" // Añadido flex para alinear matrícula y botón
               >
                 <span>{item.content}</span>
                 <button
@@ -419,7 +420,7 @@ function App() {
                   onDragEnter={() => handleDragEnter(zoneId)}
                   onDragLeave={handleDragLeave}
                   style={getListStyle(hoveredZoneId === zoneId)}
-                  className="rounded-lg transition-colors duration-200 flex flex-col items-center"
+                  className="rounded-lg transition-colors duration-200 flex flex-col items-center overflow-y-auto max-h-96" /* Añadido overflow-y-auto y max-h-96 */
                 >
                   {zone.items.length === 0 && (
                     <p className="text-gray-500 text-center py-4">Arrastra matrículas aquí.</p>
